@@ -16,6 +16,7 @@ import RNBluetoothClassic, {
 } from 'react-native-bluetooth-classic';
 
 import { DPad } from '@/components/DPad';
+import { useGamepad } from '@/hooks/useGamepad';
 
 export default function App() {
   const [devices, setDevices] = useState<BluetoothDevice[]>([]);
@@ -143,6 +144,11 @@ export default function App() {
     }
   };
 
+  const { lastKey, lastMotion, activeAction } = useGamepad({
+    onCommand: sendCommand,
+    enabled: true,
+  });
+
   if (!bluetoothEnabled) {
     return (
       <View style={styles.centerContainer}>
@@ -214,6 +220,50 @@ export default function App() {
           )}
         </View>
       )}
+
+      {/* Gamepad Driving Status & Live Feedback */}
+      <View style={styles.gamepadMonitor}>
+        <View style={styles.gamepadHeader}>
+          <Text style={styles.gamepadTitle}>🎮 Controller Driving</Text>
+          <Text
+            style={[
+              styles.gamepadStatus,
+              activeAction
+                ? styles.gamepadDriving
+                : lastKey || lastMotion
+                ? styles.gamepadActive
+                : styles.gamepadIdle,
+            ]}
+          >
+            {activeAction ? activeAction : connectedDevice ? 'READY' : 'STANDBY'}
+          </Text>
+        </View>
+
+        {activeAction ? (
+          <View style={styles.activeDrivingBox}>
+            <Text style={styles.activeDrivingText}>
+              🏎️ Active: <Text style={styles.highlightText}>{activeAction}</Text>
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.gamepadWaitingText}>
+            R2 to drive forward, L2 backward, Joystick to steer, A to spin.
+          </Text>
+        )}
+
+        <View style={styles.controlsRow}>
+          <Text style={styles.controlBadge}>R2: Forward</Text>
+          <Text style={styles.controlBadge}>L2: Backward</Text>
+          <Text style={styles.controlBadge}>Stick: Steer</Text>
+          <Text style={styles.controlBadge}>A: Spin</Text>
+        </View>
+
+        {lastMotion && (
+          <Text style={styles.gamepadMotionText} numberOfLines={1}>
+            🕹️ Stick: [{lastMotion.axisX.toFixed(2)}, {lastMotion.axisY.toFixed(2)}] | L2: {lastMotion.lTrigger.toFixed(2)} | R2: {lastMotion.rTrigger.toFixed(2)}
+          </Text>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -351,5 +401,115 @@ const styles = StyleSheet.create({
   refreshBtnText: {
     color: '#fff',
     fontWeight: 'bold',
-  }
+  },
+  gamepadMonitor: {
+    backgroundColor: '#1e293b',
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    padding: 14,
+    marginHorizontal: 10,
+    marginBottom: 8,
+    borderRadius: 12,
+  },
+  gamepadHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  gamepadTitle: {
+    color: '#f1f5f9',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  gamepadStatus: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  gamepadActive: {
+    backgroundColor: '#065f46',
+    color: '#34d399',
+  },
+  gamepadDriving: {
+    backgroundColor: '#3b82f6',
+    color: '#ffffff',
+  },
+  gamepadIdle: {
+    backgroundColor: '#334155',
+    color: '#94a3b8',
+  },
+  activeDrivingBox: {
+    backgroundColor: '#0f172a',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginVertical: 4,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  activeDrivingText: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 6,
+  },
+  controlBadge: {
+    backgroundColor: '#334155',
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  gamepadInfo: {
+    marginTop: 4,
+  },
+  gamepadKeyText: {
+    color: '#cbd5e1',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  highlightText: {
+    color: '#38bdf8',
+    fontWeight: 'bold',
+  },
+  gamepadActionText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  actionDown: {
+    color: '#4ade80',
+    fontWeight: 'bold',
+  },
+  actionUp: {
+    color: '#f87171',
+    fontWeight: 'bold',
+  },
+  gamepadDeviceText: {
+    color: '#64748b',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  gamepadWaitingText: {
+    color: '#64748b',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  gamepadMotionText: {
+    color: '#a78bfa',
+    fontSize: 11,
+    marginTop: 4,
+    fontFamily: Platform.OS === 'android' ? 'monospace' : undefined,
+  },
 });
