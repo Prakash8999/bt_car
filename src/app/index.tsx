@@ -127,20 +127,31 @@ export default function App() {
     }
   };
 
+  const isSendingRef = React.useRef(false);
+
   const sendCommand = async (command: string) => {
-    if (connectedDevice) {
-      try {
-        await connectedDevice.write(command);
-      } catch (err: any) {
-        console.error('Failed to send data', err);
-        // If the error indicates we are no longer connected, reset UI
-        if (err.message && err.message.includes('Not connected')) {
-          setConnectedDevice(null);
-          Alert.alert('Disconnected', 'Connection lost. Please reconnect.');
-        }
-      }
-    } else {
+    if (!connectedDevice) {
       console.warn('Cannot send command: not connected.');
+      return;
+    }
+
+    // Always allow STOP command to execute immediately; prevent overlapping repeating writes
+    if (isSendingRef.current && command !== 'S') {
+      return;
+    }
+
+    isSendingRef.current = true;
+    try {
+      await connectedDevice.write(command);
+    } catch (err: any) {
+      console.error('Failed to send data', err);
+      // If the error indicates we are no longer connected, reset UI
+      if (err.message && err.message.includes('Not connected')) {
+        setConnectedDevice(null);
+        Alert.alert('Disconnected', 'Connection lost. Please reconnect.');
+      }
+    } finally {
+      isSendingRef.current = false;
     }
   };
 

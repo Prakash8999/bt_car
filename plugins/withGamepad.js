@@ -128,8 +128,9 @@ import com.facebook.react.bridge.ReactContext
       val diffHatY = Math.abs(hatY - lastHatY)
       val diffL = Math.abs(lTrigger - lastLTrigger)
       val diffR = Math.abs(rTrigger - lastRTrigger)
-
-      if (diffX > 0.08f || diffY > 0.08f || diffHatX > 0.1f || diffHatY > 0.1f || diffL > 0.08f || diffR > 0.08f) {
+      val isSignificant = diffX > 0.03f || diffY > 0.03f || diffHatX > 0.1f || diffHatY > 0.1f || diffL > 0.02f || diffR > 0.02f ||
+                          (lTrigger == 0f && lastLTrigger > 0f) || (rTrigger == 0f && lastRTrigger > 0f)
+      if (isSignificant) {
         lastAxisX = axisX
         lastAxisY = axisY
         lastHatX = hatX

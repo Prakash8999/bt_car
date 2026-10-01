@@ -26,6 +26,12 @@ interface UseGamepadOptions {
   enabled?: boolean;
 }
 
+// Thresholds with hysteresis
+const TRIGGER_ACTIVATE = 0.85;   // Activate forward/backward when pulled firmly (~1.0)
+const TRIGGER_DEACTIVATE = 0.35; // Deactivate only when finger released (< 0.35)
+const STICK_ACTIVATE = 0.60;     // Activate steering past 60% tilt
+const STICK_DEACTIVATE = 0.25;   // Deactivate only when stick returns near center
+
 export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}) {
   const [lastKey, setLastKey] = useState<GamepadKeyEvent | null>(null);
   const [lastMotion, setLastMotion] = useState<GamepadMotionEvent | null>(null);
@@ -43,12 +49,11 @@ export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}
   const startAction = (source: string, cmd: string, actionName: string) => {
     if (!enabledRef.current) return;
 
-    // If already actively running this source and command, don't restart interval
+    // Already running this action
     if (activeSourceRef.current === source && activeCmdRef.current === cmd) {
       return;
     }
 
-    // Clear previous timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -58,7 +63,7 @@ export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}
     activeCmdRef.current = cmd;
     setActiveAction(actionName);
 
-    console.log(`🎮 [GAMEPAD ACTION START] ${actionName} -> Command: '${cmd}' (Source: ${source})`);
+    console.log(`🚗 [DRIVE START] ${actionName} -> Command '${cmd}' (via ${source})`);
 
     if (onCommandRef.current) {
       onCommandRef.current(cmd);
@@ -75,7 +80,7 @@ export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}
     }
 
     if (activeSourceRef.current !== null) {
-      console.log(`🛑 [GAMEPAD ACTION STOP] Stopped '${activeSourceRef.current}' -> Sending 'S'`);
+      console.log(`🛑 [DRIVE STOP] Stopped '${activeSourceRef.current}' -> Sending 'S'`);
       activeSourceRef.current = null;
       activeCmdRef.current = null;
       setActiveAction(null);
@@ -90,25 +95,25 @@ export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}
     if (Platform.OS !== 'android') return;
 
     const keySub = DeviceEventEmitter.addListener('onGamepadKeyEvent', (data: GamepadKeyEvent) => {
+      // Print every key press/release to console (just like in initial test)
+      console.log(`🎮 [GAMEPAD KEY] ${data.action} -> ${data.keyName} (Code: ${data.keyCode}) | Device: ${data.deviceName}`);
       setLastKey(data);
 
       const isButtonA = data.keyCode === 96 || data.keyName === 'KEYCODE_BUTTON_A';
 
-      // 1. Button A -> SPIN (holds repeat while pressed, stops on release)
+      // 1. Button A -> SPIN
       if (isButtonA) {
         if (data.action === 'DOWN') {
           if (data.repeatCount === 0) {
             startAction('BUTTON_A', 'F', 'SPIN');
           }
         } else if (data.action === 'UP') {
-          if (activeSourceRef.current === 'BUTTON_A') {
-            stopAction();
-          }
+          stopAction();
         }
         return;
       }
 
-      // 2. Optional D-Pad keys (if controller sends D-pad as KeyEvents)
+      // 2. D-Pad keys (if controller sends D-pad as KeyEvents)
       if (data.keyCode === 19 || data.keyName === 'KEYCODE_DPAD_UP') {
         if (data.action === 'DOWN' && data.repeatCount === 0) startAction('DPAD_UP', 'R', 'FORWARD');
         else if (data.action === 'UP' && activeSourceRef.current === 'DPAD_UP') stopAction();
@@ -125,60 +130,83 @@ export function useGamepad({ onCommand, enabled = true }: UseGamepadOptions = {}
     });
 
     const motionSub = DeviceEventEmitter.addListener('onGamepadMotionEvent', (data: GamepadMotionEvent) => {
+      const { axisX, lTrigger, rTrigger, hatX, hatY } = data;
+
+      // Print motion updates to console
+      if (rTrigger > 0.05 || lTrigger > 0.05 || Math.abs(axisX) > 0.1 || hatX !== 0 || hatY !== 0) {
+        console.log(`🕹️ [GAMEPAD MOTION] Stick: [X: ${axisX.toFixed(2)}] | L2: ${lTrigger.toFixed(2)}, R2: ${rTrigger.toFixed(2)} | Hat: [${hatX}, ${hatY}]`);
+      }
+
       setLastMotion(data);
 
-      // If Button A is spinning, don't interrupt it with tiny analog stick jitter
+      // Do not allow stick jitter to interrupt Button A spin
       if (activeSourceRef.current === 'BUTTON_A') {
         return;
       }
 
-      const { axisX, lTrigger, rTrigger, hatX, hatY } = data;
-
-      // 1. Right Terminal (R2 Trigger) -> FORWARD (Trigger must reach 1 / >= 0.95)
-      if (rTrigger >= 0.95) {
+      // 1. Right Terminal (R2 Trigger) -> FORWARD with Hysteresis
+      if (activeSourceRef.current === 'R2') {
+        if (rTrigger < TRIGGER_DEACTIVATE) {
+          stopAction();
+        }
+        return;
+      } else if (rTrigger >= TRIGGER_ACTIVATE) {
         startAction('R2', 'R', 'FORWARD');
         return;
       }
 
-      // 2. Left Terminal (L2 Trigger) -> BACKWARD (Trigger must reach 1 / >= 0.95)
-      if (lTrigger >= 0.95) {
+      // 2. Left Terminal (L2 Trigger) -> BACKWARD with Hysteresis
+      if (activeSourceRef.current === 'L2') {
+        if (lTrigger < TRIGGER_DEACTIVATE) {
+          stopAction();
+        }
+        return;
+      } else if (lTrigger >= TRIGGER_ACTIVATE) {
         startAction('L2', 'L', 'BACKWARD');
         return;
       }
 
-      // 3. Joystick Left / Right (axisX or D-pad Hat)
-      if (axisX <= -0.65 || hatX === -1) {
+      // 3. Joystick Left / D-pad Left -> STEER LEFT with Hysteresis
+      if (activeSourceRef.current === 'JOY_LEFT') {
+        if (axisX > -STICK_DEACTIVATE && hatX !== -1) {
+          stopAction();
+        }
+        return;
+      } else if (axisX <= -STICK_ACTIVATE || hatX === -1) {
         startAction('JOY_LEFT', 'B', 'LEFT');
         return;
       }
 
-      if (axisX >= 0.65 || hatX === 1) {
+      // 4. Joystick Right / D-pad Right -> STEER RIGHT with Hysteresis
+      if (activeSourceRef.current === 'JOY_RIGHT') {
+        if (axisX < STICK_DEACTIVATE && hatX !== 1) {
+          stopAction();
+        }
+        return;
+      } else if (axisX >= STICK_ACTIVATE || hatX === 1) {
         startAction('JOY_RIGHT', 'F', 'RIGHT');
         return;
       }
 
-      // 4. Joystick Up / Down (hatY if D-pad hat is used)
-      if (hatY === -1) {
+      // 5. Hat Up / Down (if D-pad sends hat)
+      if (activeSourceRef.current === 'HAT_UP') {
+        if (hatY !== -1) {
+          stopAction();
+        }
+        return;
+      } else if (hatY === -1) {
         startAction('HAT_UP', 'R', 'FORWARD');
         return;
       }
-      if (hatY === 1) {
+
+      if (activeSourceRef.current === 'HAT_DOWN') {
+        if (hatY !== 1) {
+          stopAction();
+        }
+        return;
+      } else if (hatY === 1) {
         startAction('HAT_DOWN', 'L', 'BACKWARD');
         return;
-      }
-
-      // 5. Release / Neutral state:
-      // If an analog action was driving, stop it once returned to neutral
-      const isAnalogAction =
-        activeSourceRef.current === 'R2' ||
-        activeSourceRef.current === 'L2' ||
-        activeSourceRef.current === 'JOY_LEFT' ||
-        activeSourceRef.current === 'JOY_RIGHT' ||
-        activeSourceRef.current === 'HAT_UP' ||
-        activeSourceRef.current === 'HAT_DOWN';
-
-      if (isAnalogAction) {
-        stopAction();
       }
     });
 
